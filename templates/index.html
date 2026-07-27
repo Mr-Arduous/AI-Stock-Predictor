@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Stock Predictor</title>
+    <style>
+        body {
+            background-color: #050505; /* Deepest pitch black */
+            color: #d1d1d1;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 50px;
+            padding-bottom: 50px;
+            /* Subtle crimson glow at the top center */
+            background-image: radial-gradient(circle at 50% -20%, #2a0808 0%, #050505 40%); 
+            background-attachment: fixed;
+        }
+        .container {
+            background: transparent;
+            padding: 40px 50px;
+            border-left: 2px solid #c91a25; /* Sharp red edge */
+            text-align: center;
+            width: 500px;
+            margin-top: 20px;
+        }
+        h1 { 
+            color: #ffffff; 
+            margin-bottom: 5px; 
+            font-weight: 300;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+        h1 span { color: #c91a25; }
+        p { 
+            color: #555; 
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        
+        /* Minimalist Input */
+        #ticker-input {
+            padding: 10px 5px;
+            font-size: 20px;
+            border: none;
+            border-bottom: 1px solid #333;
+            background: transparent;
+            color: #fff;
+            width: 70%;
+            margin-top: 40px;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            transition: border-color 0.3s ease;
+        }
+        #ticker-input:focus { 
+            outline: none;
+            border-bottom: 1px solid #c91a25; 
+        }
+        
+        /* Ghost Button */
+        button {
+            background-color: transparent;
+            color: #c91a25;
+            border: 1px solid #c91a25;
+            padding: 12px 30px;
+            font-size: 14px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            cursor: pointer;
+            margin-top: 40px;
+            transition: all 0.3s ease;
+        }
+        button:hover { 
+            background-color: #c91a25; 
+            color: #050505;
+        }
+        
+        #result {
+            margin-top: 40px;
+            font-size: 22px;
+            font-weight: 300;
+            color: #fff;
+            letter-spacing: 1px;
+        }
+        #chart {
+            margin-top: 30px;
+            max-width: 100%;
+            display: none;
+            border: 1px solid #1a1a1a; /* Very faint frame */
+        }
+        
+        /* Stripped down History Box */
+        .history-box {
+            margin-top: 50px;
+            text-align: left;
+            background: transparent;
+            padding: 20px 0;
+            border-top: 1px solid #1a1a1a;
+        }
+        .history-box h3 {
+            margin-top: 0;
+            color: #444;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            padding-bottom: 15px;
+        }
+        #history-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        #history-list li {
+            padding: 12px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #111;
+            display: flex;
+            justify-content: space-between;
+            color: #777;
+        }
+        #history-list li strong {
+            color: #ccc;
+            font-weight: 400;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI <span>Predictor</span></h1>
+        <p>LSTM Neural Engine</p>
+        
+        <input type="text" id="ticker-input" placeholder="TICKER" value="AAPL" />
+        <br>
+        <button id="predict-btn">Analyze</button>
+        
+        <div id="result"></div>
+        <img id="chart" alt="Stock Chart" />
+
+        <div class="history-box">
+            <h3>Recent Analysis</h3>
+            <ul id="history-list">
+                <li>No recent searches yet.</li>
+            </ul>
+        </div>
+    </div>
+
+<script>
+    async function loadHistory() {
+        try {
+            const response = await fetch('/history');
+            const historyData = await response.json();
+            
+            const listElement = document.getElementById('history-list');
+            listElement.innerHTML = ''; 
+            
+            if (historyData.length === 0) {
+                listElement.innerHTML = '<li>No recent searches yet.</li>';
+                return;
+            }
+
+            historyData.forEach(item => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span><strong>${item.ticker}</strong></span> <span>$${item.price.toFixed(2)}</span>`;
+                listElement.appendChild(li);
+            });
+        } catch (err) {
+            console.error("Failed to load history.");
+        }
+    }
+
+    loadHistory();
+
+    document.getElementById('predict-btn').addEventListener('click', async () => {
+        const resultDiv = document.getElementById('result');
+        const button = document.getElementById('predict-btn');
+        const chartImg = document.getElementById('chart');
+        const ticker = document.getElementById('ticker-input').value.toUpperCase() || 'AAPL';
+        
+        resultDiv.innerText = `Analyzing ${ticker}...`;
+        button.disabled = true;
+        button.style.color = "#555";
+        button.style.borderColor = "#555";
+        chartImg.style.display = "none";
+        
+        try {
+            const response = await fetch('/predict', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker: ticker })
+            });
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                resultDiv.innerText = "Error: " + data.error;
+            } else {
+                resultDiv.innerText = `Close (${ticker}): $${data.price.toFixed(2)}`;
+                chartImg.src = "data:image/png;base64," + data.chart_image;
+                chartImg.style.display = "block";
+                loadHistory(); 
+            }
+        } catch (err) {
+            resultDiv.innerText = "Failed to connect to backend.";
+        }
+        
+        button.disabled = false;
+        button.style.color = "#c91a25";
+        button.style.borderColor = "#c91a25";
+    });
+</script>
+</body>
+</html>
