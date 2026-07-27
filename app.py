@@ -52,7 +52,7 @@ class StockLSTM(nn.Module):
 # -----------------------------
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = StockLSTM().to(device)
-model.load_state_dict(torch.load('lstm_stock_model.pth', weights_only=True))
+model.load_state_dict(torch.load('lstm_stock_model.pth', map_location=torch.device('cpu'), weights_only=True))
 model.eval()
 
 # -----------------------------
