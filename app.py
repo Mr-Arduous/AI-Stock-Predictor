@@ -17,7 +17,6 @@ app = Flask(__name__)
 # 0. Database Setup
 # -----------------------------
 def init_db():
-    # Creates a file called history.db and builds the table if it doesn't exist
     conn = sqlite3.connect('history.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS search_history
@@ -27,7 +26,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Run this immediately when the app starts
 init_db()
 
 # -----------------------------
@@ -62,13 +60,11 @@ model.eval()
 def home():
     return render_template('index.html')
 
-# --- Route to fetch the history ---
 @app.route('/history', methods=['GET'])
 def get_history():
     try:
         conn = sqlite3.connect('history.db')
         c = conn.cursor()
-        # Grab the 5 most recent searches
         c.execute("SELECT ticker, predicted_price FROM search_history ORDER BY id DESC LIMIT 5")
         rows = c.fetchall()
         conn.close()
@@ -83,8 +79,9 @@ def predict_stock():
     try:
         data_in = request.get_json()
         ticker = data_in.get('ticker', 'AAPL').upper() if data_in else 'AAPL'
+        horizon = int(data_in.get('horizon', 1))
         
-        df = yf.download(ticker, period="6mo")
+        df = yf.download(ticker, period="1y")
         if df.empty:
             return jsonify({'error': f"Could not find data for {ticker}"}), 400
             
@@ -93,47 +90,38 @@ def predict_stock():
         scaled_data = scaler.fit_transform(data)
         
         last_60_days = scaled_data[-60:]
-        test_tensor = torch.tensor(last_60_days, dtype=torch.float32).unsqueeze(0).to(device)
+        
+        # Multi-step forecasting loop
+        predictions = []
+        current_input = torch.tensor(last_60_days, dtype=torch.float32).unsqueeze(0).to(device)
         
         with torch.no_grad():
-            prediction_scaled = model(test_tensor)
-            
-        predicted_price = scaler.inverse_transform(prediction_scaled.cpu().numpy())[0][0]
-        real_prices = scaler.inverse_transform(last_60_days)
+            for _ in range(horizon):
+                pred_scaled = model(current_input)
+                pred_value = pred_scaled.cpu().numpy()[0][0]
+                predictions.append(pred_value)
+                
+                new_row = torch.tensor([[[pred_value]]], dtype=torch.float32).to(device)
+                current_input = torch.cat((current_input[:, 1:, :], new_row), dim=1)
+        
+        predictions_real = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
+        final_predicted_price = float(predictions_real[-1][0])
+        real_prices = scaler.inverse_transform(last_60_days).flatten().tolist()
+        flat_preds = [float(p[0]) for p in predictions_real]
 
-        # --- Save this prediction to the Database ---
+        # Save to SQLite Database
         conn = sqlite3.connect('history.db')
         c = conn.cursor()
-        c.execute("INSERT INTO search_history (ticker, predicted_price) VALUES (?, ?)", (ticker, float(predicted_price)))
+        c.execute("INSERT INTO search_history (ticker, predicted_price) VALUES (?, ?)", (ticker, final_predicted_price))
         conn.commit()
         conn.close()
 
-        # --- NEW: Generate the Chart Image with the minimalist aesthetic ---
-        plt.figure(figsize=(8, 4))
-        plt.plot(range(60), real_prices, color='#c91a25', label=f'{ticker} History (60 Days)')
-        plt.scatter(60, predicted_price, color='white', s=100, zorder=5, label='AI Prediction')
-        
-        plt.title(f"{ticker} vs AI Prediction", color='white')
-        plt.xlabel("Days", color='#aaa')
-        plt.ylabel("Price (USD)", color='#aaa')
-        plt.legend()
-        plt.grid(color='#1a1a1a')
-        
-        ax = plt.gca()
-        ax.set_facecolor('#050505')
-        plt.gcf().patch.set_facecolor('#050505')
-        ax.tick_params(colors='#aaa')
-
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format='png', bbox_inches='tight')
-        img_buffer.seek(0)
-        plt.close()
-        
-        img_base64 = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
-
+        # Return raw data arrays for Chart.js interactive rendering
         return jsonify({
-            'price': float(predicted_price),
-            'chart_image': img_base64
+            'price': final_predicted_price,
+            'history_prices': real_prices,
+            'predictions': flat_preds,
+            'horizon': horizon
         })
         
     except Exception as e:

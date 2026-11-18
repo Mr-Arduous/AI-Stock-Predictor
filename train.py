@@ -12,7 +12,7 @@ ticker = "AAPL"
 print(f"Downloading stock data for {ticker}...")
 
 # Fetch 4 years of Apple stock data
-df = yf.download(ticker, start='2020-01-01', end='2024-01-01')
+df = yf.download(ticker, start='2022-01-01', end='2026-01-01')
 
 # Extract the 'Close' column safely
 data = df['Close'].values.reshape(-1, 1)

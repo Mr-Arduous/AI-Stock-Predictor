@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Stock Predictor</title>
+    <!-- Include Chart.js CDN for interactive tooltips & crosshairs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
-            background-color: #050505; /* Deepest pitch black */
+            background-color: #050505;
             color: #d1d1d1;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
@@ -14,16 +16,15 @@
             align-items: center;
             margin-top: 50px;
             padding-bottom: 50px;
-            /* Subtle crimson glow at the top center */
             background-image: radial-gradient(circle at 50% -20%, #2a0808 0%, #050505 40%); 
             background-attachment: fixed;
         }
         .container {
             background: transparent;
             padding: 40px 50px;
-            border-left: 2px solid #c91a25; /* Sharp red edge */
+            border-left: 2px solid #c91a25;
             text-align: center;
-            width: 500px;
+            width: 650px;
             margin-top: 20px;
         }
         h1 { 
@@ -41,7 +42,6 @@
             text-transform: uppercase;
         }
         
-        /* Minimalist Input */
         #ticker-input {
             padding: 10px 5px;
             font-size: 20px;
@@ -60,9 +60,31 @@
             outline: none;
             border-bottom: 1px solid #c91a25; 
         }
+
+        .horizon-selector {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 25px;
+        }
+        .horizon-btn {
+            background: transparent;
+            color: #555;
+            border: 1px solid #222;
+            padding: 6px 18px;
+            font-size: 11px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .horizon-btn.active {
+            color: #c91a25;
+            border-color: #c91a25;
+            background: rgba(201, 26, 37, 0.05);
+        }
         
-        /* Ghost Button */
-        button {
+        #predict-btn {
             background-color: transparent;
             color: #c91a25;
             border: 1px solid #c91a25;
@@ -71,10 +93,11 @@
             letter-spacing: 2px;
             text-transform: uppercase;
             cursor: pointer;
-            margin-top: 40px;
+            margin-top: 30px;
             transition: all 0.3s ease;
+            width: 100%;
         }
-        button:hover { 
+        #predict-btn:hover { 
             background-color: #c91a25; 
             color: #050505;
         }
@@ -86,14 +109,18 @@
             color: #fff;
             letter-spacing: 1px;
         }
-        #chart {
+
+        /* Interactive Canvas Container */
+        .chart-container {
             margin-top: 30px;
-            max-width: 100%;
+            width: 100%;
             display: none;
-            border: 1px solid #1a1a1a; /* Very faint frame */
+            border: 1px solid #1a1a1a;
+            background: #080808;
+            padding: 10px;
+            border-radius: 4px;
         }
         
-        /* Stripped down History Box */
         .history-box {
             margin-top: 50px;
             text-align: left;
@@ -115,12 +142,23 @@
             margin: 0;
         }
         #history-list li {
-            padding: 12px 0;
+            padding: 12px 10px;
             font-size: 14px;
             border-bottom: 1px solid #111;
             display: flex;
             justify-content: space-between;
             color: #777;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        #history-list li:hover {
+            background: rgba(201, 26, 37, 0.05);
+            color: #fff;
+            border-bottom-color: transparent;
+        }
+        #history-list li:hover strong {
+            color: #c91a25;
         }
         #history-list li strong {
             color: #ccc;
@@ -136,10 +174,20 @@
         
         <input type="text" id="ticker-input" placeholder="TICKER" value="AAPL" />
         <br>
+        
+        <div class="horizon-selector">
+            <button type="button" class="horizon-btn active" data-horizon="1">1 Day</button>
+            <button type="button" class="horizon-btn" data-horizon="7">7 Days</button>
+        </div>
+
         <button id="predict-btn">Analyze</button>
         
         <div id="result"></div>
-        <img id="chart" alt="Stock Chart" />
+        
+        <!-- Interactive Chart.js Canvas Container -->
+        <div id="chart-box" class="chart-container">
+            <canvas id="stockChart"></canvas>
+        </div>
 
         <div class="history-box">
             <h3>Recent Analysis</h3>
@@ -150,11 +198,21 @@
     </div>
 
 <script>
+    let selectedHorizon = 1;
+    let stockChartInstance = null;
+
+    document.querySelectorAll('.horizon-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.horizon-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            selectedHorizon = parseInt(e.target.getAttribute('data-horizon'));
+        });
+    });
+
     async function loadHistory() {
         try {
             const response = await fetch('/history');
             const historyData = await response.json();
-            
             const listElement = document.getElementById('history-list');
             listElement.innerHTML = ''; 
             
@@ -166,6 +224,13 @@
             historyData.forEach(item => {
                 const li = document.createElement('li');
                 li.innerHTML = `<span><strong>${item.ticker}</strong></span> <span>$${item.price.toFixed(2)}</span>`;
+                
+                // Clickable search history: autofills input and re-runs analysis instantly
+                li.addEventListener('click', () => {
+                    document.getElementById('ticker-input').value = item.ticker;
+                    document.getElementById('predict-btn').click();
+                });
+
                 listElement.appendChild(li);
             });
         } catch (err) {
@@ -178,20 +243,20 @@
     document.getElementById('predict-btn').addEventListener('click', async () => {
         const resultDiv = document.getElementById('result');
         const button = document.getElementById('predict-btn');
-        const chartImg = document.getElementById('chart');
+        const chartBox = document.getElementById('chart-box');
         const ticker = document.getElementById('ticker-input').value.toUpperCase() || 'AAPL';
         
-        resultDiv.innerText = `Analyzing ${ticker}...`;
+        resultDiv.innerText = `Analyzing ${ticker} (${selectedHorizon}-Day Horizon)...`;
         button.disabled = true;
         button.style.color = "#555";
         button.style.borderColor = "#555";
-        chartImg.style.display = "none";
+        chartBox.style.display = "none";
         
         try {
             const response = await fetch('/predict', { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ticker: ticker })
+                body: JSON.stringify({ ticker: ticker, horizon: selectedHorizon })
             });
             
             const data = await response.json();
@@ -199,9 +264,11 @@
             if (data.error) {
                 resultDiv.innerText = "Error: " + data.error;
             } else {
-                resultDiv.innerText = `Close (${ticker}): $${data.price.toFixed(2)}`;
-                chartImg.src = "data:image/png;base64," + data.chart_image;
-                chartImg.style.display = "block";
+                const labelText = selectedHorizon === 1 ? `Close (${ticker})` : `${selectedHorizon}-Day Target (${ticker})`;
+                resultDiv.innerText = `${labelText}: $${data.price.toFixed(2)}`;
+                
+                chartBox.style.display = "block";
+                renderInteractiveChart(ticker, data.history_prices, data.predictions, selectedHorizon);
                 loadHistory(); 
             }
         } catch (err) {
@@ -212,6 +279,95 @@
         button.style.color = "#c91a25";
         button.style.borderColor = "#c91a25";
     });
+
+    function renderInteractiveChart(ticker, historyPrices, predictions, horizon) {
+        const ctx = document.getElementById('stockChart').getContext('2d');
+        
+        if (stockChartInstance) {
+            stockChartInstance.destroy();
+        }
+
+        const totalDays = 60 + horizon;
+        const labels = Array.from({length: totalDays}, (_, i) => i + 1);
+
+        const historyDataset = [...historyPrices, ...Array(horizon).fill(null)];
+        
+        const predictionDataset = Array(59).fill(null);
+        predictionDataset.push(historyPrices[historyPrices.length - 1]);
+        predictions.forEach(p => predictionDataset.push(p));
+
+        stockChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: `${ticker} History (60 Days)`,
+                        data: historyDataset,
+                        borderColor: '#c91a25',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.1
+                    },
+                    {
+                        label: `AI ${horizon}-Day Forecast`,
+                        data: predictionDataset,
+                        borderColor: '#00ff66',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 4,
+                        pointBackgroundColor: '#00ff66',
+                        tension: 0.1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#aaa', font: { family: 'Segoe UI', size: 11 } }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(10, 10, 10, 0.9)',
+                        titleColor: '#fff',
+                        bodyColor: '#00ff66',
+                        borderColor: '#333',
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) label += ': ';
+                                if (context.parsed.y !== null) {
+                                    label += '$' + context.parsed.y.toFixed(2);
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: '#141414' },
+                        ticks: { color: '#666', font: { size: 10 } },
+                        title: { display: true, text: 'Timeline (Days)', color: '#555' }
+                    },
+                    y: {
+                        grid: { color: '#141414' },
+                        ticks: { 
+                            color: '#666', 
+                            font: { size: 10 },
+                            callback: function(value) { return '$' + value.toFixed(0); }
+                        },
+                        title: { display: true, text: 'Price (USD)', color: '#555' }
+                    }
+                }
+            }
+        });
+    }
 </script>
 </body>
 </html>
